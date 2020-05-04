@@ -244,68 +244,97 @@ pub const Logger = struct {
                 out_stream.print(fmt, args) catch return;
             } else {
                 _ = out_stream.write(fmt) catch return;
+                _ = out_stream.write("\n") catch return;
             }
-            _ = out_stream.write("\n") catch return;
         }
     }
 
     /// log at level `Level.Trace`.
-    pub fn logTrace(self: *Self, comptime fmt: []const u8, args: var) void {
-        self.log(Level.Trace, fmt, args) catch return;
+    pub fn Trace(self: *Self, comptime str: []const u8) void {
+        self.log(Level.Trace, str, .{}) catch return;
     }
 
     /// log at level `Level.Debug`.
-    pub fn logDebug(self: *Self, comptime fmt: []const u8, args: var) void {
-        self.log(Level.Debug, fmt, args) catch return;
+    pub fn Debug(self: *Self, comptime str: []const u8) void {
+        self.log(Level.Debug, str, .{}) catch return;
     }
 
     /// log at level `Level.Info`.
-    pub fn logInfo(self: *Self, comptime fmt: []const u8, args: var) void {
-        self.log(Level.Info, fmt, args) catch return;
+    pub fn Info(self: *Self, comptime str: []const u8) void {
+        self.log(Level.Info, str, .{}) catch return;
     }
 
     /// log at level `Level.Warn`.
-    pub fn logWarn(self: *Self, comptime fmt: []const u8, args: var) void {
-        self.log(Level.Warn, fmt, args) catch return;
+    pub fn Warn(self: *Self, comptime str: []const u8) void {
+        self.log(Level.Warn, str, .{}) catch return;
     }
 
     /// log at level `Level.Error`.
-    pub fn logError(self: *Self, comptime fmt: []const u8, args: var) void {
-        self.log(Level.Error, fmt, args) catch return;
+    pub fn Error(self: *Self, comptime str: []const u8) void {
+        self.log(Level.Error, str, .{}) catch return;
     }
 
     /// log at level `Level.Fatal`.
-    pub fn logFatal(self: *Self, comptime fmt: []const u8, args: var) void {
+    pub fn Fatal(self: *Self, comptime str: []const u8) void {
+        self.log(Level.Fatal, str, .{}) catch return;
+    }
+
+    /// log at level `Level.Tracef`.
+    pub fn Tracef(self: *Self, comptime fmt: []const u8, args: var) void {
+        self.log(Level.Trace, fmt, args) catch return;
+    }
+
+    /// log at level `Level.Debugf`.
+    pub fn Debugf(self: *Self, comptime fmt: []const u8, args: var) void {
+        self.log(Level.Debug, fmt, args) catch return;
+    }
+
+    /// log at level `Level.Infof`.
+    pub fn Infof(self: *Self, comptime fmt: []const u8, args: var) void {
+        self.log(Level.Info, fmt, args) catch return;
+    }
+
+    /// log at level `Level.Warnf`.
+    pub fn Warnf(self: *Self, comptime fmt: []const u8, args: var) void {
+        self.log(Level.Warn, fmt, args) catch return;
+    }
+
+    /// log at level `Level.Errorf`.
+    pub fn Errorf(self: *Self, comptime fmt: []const u8, args: var) void {
+        self.log(Level.Error, fmt, args) catch return;
+    }
+
+    /// log at level `Level.Fatalf`.
+    pub fn Fatalf(self: *Self, comptime fmt: []const u8, args: var) void {
         self.log(Level.Fatal, fmt, args) catch return;
     }
 };
 
 test "log_with_color" {
     var logger = Logger.new(io.getStdOut(), true);
-    std.debug.warn("\n", .{});
-    logger.logTrace("hi", .{});
-    logger.logDebug("hey", .{});
-    logger.logInfo("hello", .{});
+    logger.Trace("hi");
+    logger.Debug("hey");
+    logger.Info("hello");
     const world = "world";
     const num = 12345;
-    logger.logInfo("hello {} {}", .{ world, num });
-    logger.logWarn("greetings", .{});
-    logger.logError("salutations", .{});
-    logger.logFatal("goodbye", .{});
+    logger.Infof("hello {} {}\n", .{ world, num });
+    logger.Warn("greetings");
+    logger.Error("salutations");
+    logger.Fatal("goodbye");
 }
 
 fn worker(logger: *Logger) void {
-    logger.logTrace("hi", .{});
+    logger.Trace("hi");
     std.time.sleep(10000);
-    logger.logDebug("hey", .{});
+    logger.Debug("hey");
     std.time.sleep(10);
-    logger.logInfo("hello", .{});
+    logger.Info("hello");
     std.time.sleep(100);
-    logger.logWarn("greetings", .{});
+    logger.Warn("greetings");
     std.time.sleep(1000);
-    logger.logError("salutations", .{});
+    logger.Error("salutations");
     std.time.sleep(10000);
-    logger.logFatal("goodbye", .{});
+    logger.Fatal("goodbye");
     std.time.sleep(1000000000);
 }
 
