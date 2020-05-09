@@ -107,6 +107,7 @@ pub const Logger = struct {
     file: fs.File,
     file_stream: fs.File.OutStream,
     out_stream: ?ProtectedOutStream,
+    date: date_handler,
 
     default_attrs: windows.WORD,
 
@@ -115,6 +116,22 @@ pub const Logger = struct {
     use_color: bool,
     use_bright: bool,
 
+    const date_handler = fn (
+        self: *Self,
+    ) void;
+
+    fn default_date_handler(self: *Self) void {
+        var out = self.getOutStream();
+        var out_held = out.acquire();
+        defer out_held.release();
+        var out_stream = out_held.value.*;
+        out_stream.write(std.time.timestamp()) catch unreachable;
+    }
+
+    fn set_date_handler(self: *Self, func: date_handler) void {
+        self.date = func;
+    }
+
     /// create `Logger`.
     pub fn new(file: fs.File, use_color: bool) Self {
         // TODO handle error
@@ -122,11 +139,11 @@ pub const Logger = struct {
         if (std.Target.current.os.tag == .windows) {
             _ = windows.kernel32.GetConsoleScreenBufferInfo(file.handle, &info);
         }
-
         return Self{
             .file = file,
             .file_stream = file.outStream(),
             .out_stream = undefined,
+            .date = undefined,
             .level = Protected(Level).init(Level.Trace),
             .quiet = Protected(bool).init(false),
             .default_attrs = info.wAttributes,
@@ -142,6 +159,15 @@ pub const Logger = struct {
         } else {
             self.out_stream = ProtectedOutStream.init(&self.file_stream);
             return self.out_stream.?;
+        }
+    }
+
+    fn getDateHandler(self: *Self) date_handler {
+        if (self.date) |date| {
+            return date;
+        } else {
+            self.date = self.default_date_handler(self);
+            return self.date.?;
         }
     }
 
@@ -230,7 +256,11 @@ pub const Logger = struct {
 
         if (!quiet_held.value.*) {
             if (self.use_color and self.file.isTty()) {
-                try out_stream.print("{} ", .{std.time.timestamp()});
+                // if (self.date != undefined) {
+                try out_stream.print("{} ", .{self.date(self)});
+                // } else {
+                //     try out_stream.print("{} ", .{std.time.timestamp()});
+                // }
                 try self.setTtyColor(level.color());
                 try out_stream.print("[{}]", .{level.toString()});
                 try self.setTtyColor(TtyColor.Reset);
@@ -352,4 +382,19 @@ test "log_thread_safe" {
     for (threads) |t| {
         t.wait();
     }
+}
+
+fn date_handler_test(log: *Logger) void {
+    _ = log.file_stream.write("foo") catch unreachable;
+}
+
+test "log_date_handler" {
+    var buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer buf.deinit();
+    var logger = Logger.new(buf, true);
+    std.debug.warn("\n", .{});
+    logger.set_date_handler(date_handler_test);
+    logger.Error("boo!");
+    const expect = "foo [ERROR]: boo!";
+    testing.expect(std.mem.eql(u8, buf.items, expect));
 }
