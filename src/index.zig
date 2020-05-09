@@ -10,6 +10,8 @@ const builtin = @import("builtin");
 const io = std.io;
 const os = std.os;
 const fs = std.fs;
+const math = std.math;
+const testing = std.testing;
 
 const windows = os.windows;
 const posix = os.posix;
@@ -125,6 +127,7 @@ pub const Logger = struct {
         var out_held = out.acquire();
         defer out_held.release();
         var out_stream = out_held.value.*;
+        std.debug.warn("in here\n", .{});
         out_stream.write(std.time.timestamp()) catch unreachable;
     }
 
@@ -256,11 +259,7 @@ pub const Logger = struct {
 
         if (!quiet_held.value.*) {
             if (self.use_color and self.file.isTty()) {
-                // if (self.date != undefined) {
                 try out_stream.print("{} ", .{self.date(self)});
-                // } else {
-                //     try out_stream.print("{} ", .{std.time.timestamp()});
-                // }
                 try self.setTtyColor(level.color());
                 try out_stream.print("[{}]", .{level.toString()});
                 try self.setTtyColor(TtyColor.Reset);
@@ -268,7 +267,8 @@ pub const Logger = struct {
                 // out_stream.print("\x1b[90m{}:{}:", filename, line);
                 // self.resetTtyColor();
             } else {
-                try out_stream.print("{} [{s}]: ", .{ std.time.timestamp(), level.toString() });
+                self.date(self);
+                try out_stream.print("[{s}]: ", .{level.toString()});
             }
             if (args.len > 0) {
                 out_stream.print(fmt, args) catch return;
@@ -385,16 +385,23 @@ test "log_thread_safe" {
 }
 
 fn date_handler_test(log: *Logger) void {
-    _ = log.file_stream.write("foo") catch unreachable;
+    _ = log.file_stream.write("foo ") catch unreachable;
+    return;
 }
 
 test "log_date_handler" {
-    var buf = std.ArrayList(u8).init(std.testing.allocator);
-    defer buf.deinit();
-    var logger = Logger.new(buf, true);
-    std.debug.warn("\n", .{});
+    const file = try std.fs.cwd().createFile("test_temp", .{
+        .mode = 0o755,
+        .truncate = true,
+    });
+    defer file.close();
+    var logger = Logger.new(file, true);
     logger.set_date_handler(date_handler_test);
     logger.Error("boo!");
-    const expect = "foo [ERROR]: boo!";
-    testing.expect(std.mem.eql(u8, buf.items, expect));
+    const expect = "foo [ERROR]: boo!\n";
+    const out = try fs.cwd().readFileAlloc(testing.allocator, "test_temp", math.maxInt(usize));
+    defer std.testing.allocator.free(out);
+    std.debug.warn("\ngot: '{}'\nexp: '{}'\n", .{ out, expect });
+    testing.expect(std.mem.eql(u8, out, expect));
+    _ = std.fs.cwd().deleteFile("test_temp") catch unreachable;
 }
