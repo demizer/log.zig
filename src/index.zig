@@ -101,6 +101,17 @@ pub const Level = enum {
     }
 };
 
+const date_handler = fn (
+    log: *Logger,
+) void;
+
+fn default_date_handler(log: *Logger) void {
+    var out = log.getOutStream();
+    var out_held = out.acquire();
+    defer out_held.release();
+    out_held.value.*.print("{} ", .{std.time.timestamp()}) catch unreachable;
+}
+
 /// a simple thread-safe logger
 pub const Logger = struct {
     const Self = @This();
@@ -109,7 +120,7 @@ pub const Logger = struct {
     file: fs.File,
     file_stream: fs.File.OutStream,
     out_stream: ?ProtectedOutStream,
-    date: date_handler,
+    date: ?date_handler,
 
     default_attrs: windows.WORD,
 
@@ -117,19 +128,6 @@ pub const Logger = struct {
     quiet: Protected(bool),
     use_color: bool,
     use_bright: bool,
-
-    const date_handler = fn (
-        self: *Self,
-    ) void;
-
-    fn default_date_handler(self: *Self) void {
-        var out = self.getOutStream();
-        var out_held = out.acquire();
-        defer out_held.release();
-        var out_stream = out_held.value.*;
-        std.debug.warn("in here\n", .{});
-        out_stream.write(std.time.timestamp()) catch unreachable;
-    }
 
     fn set_date_handler(self: *Self, func: date_handler) void {
         self.date = func;
@@ -145,8 +143,8 @@ pub const Logger = struct {
         return Self{
             .file = file,
             .file_stream = file.outStream(),
-            .out_stream = undefined,
-            .date = undefined,
+            .out_stream = null,
+            .date = null,
             .level = Protected(Level).init(Level.Trace),
             .quiet = Protected(bool).init(false),
             .default_attrs = info.wAttributes,
@@ -169,7 +167,7 @@ pub const Logger = struct {
         if (self.date) |date| {
             return date;
         } else {
-            self.date = self.default_date_handler(self);
+            self.date = default_date_handler;
             return self.date.?;
         }
     }
@@ -246,6 +244,7 @@ pub const Logger = struct {
         }
 
         var out = self.getOutStream();
+        var date = self.getDateHandler();
         var out_held = out.acquire();
         defer out_held.release();
         var out_stream = out_held.value.*;
@@ -258,8 +257,9 @@ pub const Logger = struct {
         // time includes the year
 
         if (!quiet_held.value.*) {
+            date(self);
             if (self.use_color and self.file.isTty()) {
-                try out_stream.print("{} ", .{self.date(self)});
+                // try out_stream.print("{} ", .{date(self)});
                 try self.setTtyColor(level.color());
                 try out_stream.print("[{}]", .{level.toString()});
                 try self.setTtyColor(TtyColor.Reset);
@@ -267,7 +267,6 @@ pub const Logger = struct {
                 // out_stream.print("\x1b[90m{}:{}:", filename, line);
                 // self.resetTtyColor();
             } else {
-                self.date(self);
                 try out_stream.print("[{s}]: ", .{level.toString()});
             }
             if (args.len > 0) {
@@ -386,7 +385,6 @@ test "log_thread_safe" {
 
 fn date_handler_test(log: *Logger) void {
     _ = log.file_stream.write("foo ") catch unreachable;
-    return;
 }
 
 test "log_date_handler" {
