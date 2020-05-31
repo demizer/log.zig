@@ -129,7 +129,7 @@ pub const Logger = struct {
     use_color: bool,
     use_bright: bool,
 
-    fn set_date_handler(self: *Self, func: date_handler) void {
+    pub fn set_date_handler(self: *Self, func: date_handler) void {
         self.date = func;
     }
 
