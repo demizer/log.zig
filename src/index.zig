@@ -46,7 +46,7 @@ fn Protected(comptime T: type) type {
 
         pub fn init(data: T) Self {
             return Self{
-                .mutex = Mutex.init(),
+                .mutex = Mutex{},
                 .private_data = data,
             };
         }
@@ -203,7 +203,7 @@ pub const Logger = struct {
                 TtyColor.Magenta => out_held.value.*.print("{}\x1b[35m", .{bright}),
                 TtyColor.Cyan => out_held.value.*.print("{}\x1b[36m", .{bright}),
                 TtyColor.Blue => out_held.value.*.print("{}\x1b[34m", .{bright}),
-                TtyColor.Reset => blk: {
+                TtyColor.Reset => {
                     _ = try out_held.value.*.write("\x1b[0m");
                 },
             };
@@ -235,7 +235,7 @@ pub const Logger = struct {
     }
 
     /// General purpose log function.
-    pub fn log(self: *Self, level: Level, comptime fmt: []const u8, args: var) !void {
+    pub fn log(self: *Self, level: Level, comptime fmt: []const u8, args: anytype) !void {
         const level_held = self.level.acquire();
         defer level_held.release();
 
@@ -309,32 +309,32 @@ pub const Logger = struct {
     }
 
     /// log at level `Level.Tracef`.
-    pub fn Tracef(self: *Self, comptime fmt: []const u8, args: var) void {
+    pub fn Tracef(self: *Self, comptime fmt: []const u8, args: anytype) void {
         self.log(Level.Trace, fmt, args) catch return;
     }
 
     /// log at level `Level.Debugf`.
-    pub fn Debugf(self: *Self, comptime fmt: []const u8, args: var) void {
+    pub fn Debugf(self: *Self, comptime fmt: []const u8, args: anytype) void {
         self.log(Level.Debug, fmt, args) catch return;
     }
 
     /// log at level `Level.Infof`.
-    pub fn Infof(self: *Self, comptime fmt: []const u8, args: var) void {
+    pub fn Infof(self: *Self, comptime fmt: []const u8, args: anytype) void {
         self.log(Level.Info, fmt, args) catch return;
     }
 
     /// log at level `Level.Warnf`.
-    pub fn Warnf(self: *Self, comptime fmt: []const u8, args: var) void {
+    pub fn Warnf(self: *Self, comptime fmt: []const u8, args: anytype) void {
         self.log(Level.Warn, fmt, args) catch return;
     }
 
     /// log at level `Level.Errorf`.
-    pub fn Errorf(self: *Self, comptime fmt: []const u8, args: var) void {
+    pub fn Errorf(self: *Self, comptime fmt: []const u8, args: anytype) void {
         self.log(Level.Error, fmt, args) catch return;
     }
 
     /// log at level `Level.Fatalf`.
-    pub fn Fatalf(self: *Self, comptime fmt: []const u8, args: var) void {
+    pub fn Fatalf(self: *Self, comptime fmt: []const u8, args: anytype) void {
         self.log(Level.Fatal, fmt, args) catch return;
     }
 };
