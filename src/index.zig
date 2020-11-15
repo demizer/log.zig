@@ -41,7 +41,7 @@ pub const TTY = enum {
     Bright,
     Dim,
 
-    fn Code(self: Self) []const u8 {
+    pub fn Code(self: Self) []const u8 {
         return switch (self) {
             .Red => "\x1b[31m",
             .Green => "\x1b[32m",
@@ -83,7 +83,7 @@ pub const Level = enum {
     Error,
     Fatal,
 
-    fn toString(self: Self) []const u8 {
+    pub fn toString(self: Self) []const u8 {
         return switch (self) {
             Self.Trace => "TRACE",
             Self.Debug => "DEBUG",
@@ -94,7 +94,7 @@ pub const Level = enum {
         };
     }
 
-    fn color(self: Self) TTY {
+    pub fn color(self: Self) TTY {
         return switch (self) {
             Self.Trace => TTY.Blue,
             Self.Debug => TTY.Cyan,
@@ -114,10 +114,57 @@ pub const LoggerOptions = struct {
     doubleSpacing: bool = false,
 };
 
+/// Used only for writing a single debug info line in the prefix formatter
+/// This is a work around until https://github.com/ziglang/zig/issues/7106
+/// Uses more stack memory than is probably necessary, but it will hopefully be enough
+pub fn DebugInfoWriter() type {
+    return struct {
+        const Self = @This();
+
+        items: Slice = std.mem.zeroes([400]u8),
+        capacity: usize = 0,
+        lastWriteEnd: usize = 0,
+
+        pub const Slice = [400]u8;
+        pub const SliceConst = []const u8;
+
+        pub fn appendSlice(self: *Self, items: SliceConst) !void {
+            // std.debug.warn("last: {}, len: {}, items.len: {}\n", .{ self.lastWriteEnd, self.items.len, items.len });
+            std.mem.copy(u8, self.items[self.lastWriteEnd..], items);
+            self.lastWriteEnd += items.len;
+        }
+
+        usingnamespace struct {
+            pub const Writer = std.io.Writer(*Self, error{OutOfMemory}, appendWrite);
+
+            /// Initializes a Writer which will append to the list.
+            pub fn writer(self: *Self) Writer {
+                return .{ .context = self };
+            }
+
+            /// Deprecated: use `writer`
+            pub const outStream = writer;
+
+            /// Same as `append` except it returns the number of bytes written, which is always the same
+            /// as `m.len`. The purpose of this function existing is to match `std.io.Writer` API.
+            fn appendWrite(self: *Self, m: []const u8) !usize {
+                try self.appendSlice(m);
+                return m.len;
+            }
+        };
+    };
+}
+
+// NOT THE WAY TO DO THIS
+//
+// This code has multiple workarounds due to pending proposals and compiler bugs
+//
+// "ambiguity of forced comptime types" https://github.com/ziglang/zig/issues/5672
+// "access to root source file for testing" https://github.com/ziglang/zig/issues/6621
 pub fn LogFormatPrefix(
-    allocator: *std.mem.Allocator,
-    writer: anytype,
-    config: LoggerOptions,
+    // writer: anytype,
+    // config: LoggerOptions,
+    log: *Logger,
     scopelevel: Level,
 ) void {
     // TODO: readd windows support
@@ -125,31 +172,26 @@ pub fn LogFormatPrefix(
     //         self.setTtyColorWindows(color);
     //     } else {
     //     }
-    if (config.timestamp) {
-        writer.print("{} ", .{std.time.timestamp()}) catch return;
+    if (log.options.timestamp) {
+        log.writer.print("{} ", .{std.time.timestamp()}) catch return;
     }
-    if (config.color) {
-        writer.print("{}", .{TTY.Code(.Reset)}) catch return;
-        writer.writeAll(scopelevel.color().Code()) catch return;
-        writer.print("[{}]", .{scopelevel.toString()}) catch return;
-        writer.writeAll(TTY.Reset.Code()) catch return;
-        writer.print(": ", .{}) catch return;
+    if (log.options.color) {
+        log.writer.print("{}", .{TTY.Code(.Reset)}) catch return;
+        log.writer.writeAll(scopelevel.color().Code()) catch return;
+        log.writer.print("[{}]", .{scopelevel.toString()}) catch return;
+        log.writer.writeAll(TTY.Reset.Code()) catch return;
+        log.writer.print(": ", .{}) catch return;
     } else {
-        writer.print("[{s}]: ", .{scopelevel.toString()}) catch return;
+        log.writer.print("[{s}]: ", .{scopelevel.toString()}) catch return;
     }
 
-    // TODO: allow independt fileName and lineNumber
-    if (!config.fileName and !config.lineNumber) {
+    // TODO: use better method to get the filename and line number https://github.com/ziglang/zig/issues/7106
+    // TODO: allow independent fileName and lineNumber
+    if (!log.options.fileName and !log.options.lineNumber) {
         return;
     }
-
-    // TODO remove the need for an allocator
-    // TODO use better method to get the filename and line number
-    // https://github.com/ziglang/zig/issues/7106
     var dbconfig: std.debug.TTY.Config = .no_color;
-    var lineBuf = std.ArrayList(u8).init(allocator);
-    defer lineBuf.deinit();
-
+    var lineBuf: DebugInfoWriter() = .{};
     const debug_info = std.debug.getSelfDebugInfo() catch return;
     var it = std.debug.StackIterator.init(@returnAddress(), null);
     var count: u8 = 0;
@@ -161,38 +203,54 @@ pub fn LogFormatPrefix(
         }
         count += 1;
     }
-    std.debug.printSourceAtAddress(debug_info, lineBuf.outStream(), address - 1, dbconfig) catch unreachable;
+    std.debug.printSourceAtAddress(debug_info, lineBuf.writer(), address - 1, dbconfig) catch unreachable;
     const colPos = std.mem.indexOf(u8, lineBuf.items[0..], ": ");
 
-    if (config.color) {
-        writer.print("{}[{}]: ", .{ TTY.Code(.Reset), lineBuf.items[0..colPos.?] }) catch unreachable;
+    if (log.options.color) {
+        log.writer.print("{}[{}]: ", .{ TTY.Code(.Reset), lineBuf.items[0..colPos.?] }) catch unreachable;
     } else {
-        writer.print("[{}]: ", .{lineBuf.items[0..colPos.?]}) catch unreachable;
+        log.writer.print("[{}]: ", .{lineBuf.items[0..colPos.?]}) catch unreachable;
     }
 }
+
+// Should be this:
+//
+// const PrefixFormatter = fn (writer: anytype, options: LoggerOptions, level: Level) void;
+//
+// But throws a weird compiled error:
+//
+// ./src/index.zig:430:30: error: unable to evaluate constant expression
+//     var logger = Logger.init(file, LoggerOptions{
+//
+//  Seems to be related to https://github.com/ziglang/zig/issues/5672
+//
+const PrefixFormatter = fn (log: *Logger, level: Level) void;
 
 /// a simple thread-safe logger
 pub const Logger = struct {
     const Self = @This();
 
-    allocator: *std.mem.Allocator,
     file: fs.File,
     writer: fs.File.Writer,
     default_attrs: windows.WORD,
     options: LoggerOptions,
+    mutex: Mutex = Mutex{},
+
+    // workaround until https://github.com/ziglang/zig/issues/6621
+    prefixFormatter: PrefixFormatter,
 
     /// create `Logger`.
-    pub fn init(allocator: *std.mem.Allocator, file: fs.File, options: LoggerOptions) Self {
+    pub fn init(file: fs.File, fmtFn: PrefixFormatter, options: LoggerOptions) Self {
         var info: windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
         if (std.Target.current.os.tag == .windows) {
             _ = windows.kernel32.GetConsoleScreenBufferInfo(file.handle, &info);
         }
         return Self{
-            .allocator = allocator,
             .file = file,
             .writer = file.writer(),
             .default_attrs = info.wAttributes,
             .options = options,
+            .prefixFormatter = fmtFn,
         };
     }
 
@@ -201,9 +259,10 @@ pub const Logger = struct {
         if (@enumToInt(scopeLevel) < @enumToInt(level)) {
             return;
         }
-        const held = std.debug.getStderrMutex().acquire();
+        var held = self.mutex.acquire();
         defer held.release();
-        nosuspend LogFormatPrefix(self.allocator, self.writer, self.options, scopeLevel);
+        // nosuspend self.prefixFormatter(self.writer, self.options, scopeLevel);
+        nosuspend self.prefixFormatter(self, scopeLevel);
         nosuspend self.writer.print(fmt, args) catch return;
         if (self.options.doubleSpacing) {
             self.writer.writeAll("\n") catch return;
@@ -250,7 +309,7 @@ test "Log without style" {
     });
     defer file.close();
 
-    var logger = Logger.init(testing.allocator, file, LoggerOptions{
+    var logger = Logger.init(file, LogFormatPrefix, LoggerOptions{
         .color = false,
         .timestamp = false,
         .fileName = false,
@@ -284,7 +343,7 @@ test "Log with color" {
     });
     defer file.close();
 
-    var logger = Logger.init(testing.allocator, file, LoggerOptions{
+    var logger = Logger.init(file, LogFormatPrefix, LoggerOptions{
         .color = true,
         .timestamp = false,
         .fileName = false,
@@ -331,7 +390,7 @@ test "Log Thread Safe" {
         .truncate = true,
     });
     defer file.close();
-    var logger = Logger.init(testing.allocator, file, LoggerOptions{});
+    var logger = Logger.init(file, LogFormatPrefix, LoggerOptions{});
 
     const thread_count = 5;
     var threads: [thread_count]*std.Thread = undefined;
@@ -342,6 +401,14 @@ test "Log Thread Safe" {
 
     for (threads) |t| {
         t.wait();
+    }
+    const out = try tmpDir.dir.readFileAlloc(testing.allocator, "test", math.maxInt(usize));
+    defer std.testing.allocator.free(out);
+
+    // Broken thread logging will probably contain these
+    if (std.mem.count(u8, out, "[]") > 0 or std.mem.count(u8, out, "[[") > 0) {
+        std.debug.warn("TEST FAILED!\ngot:\n\n{}\nexpect: {}\n\n", .{ out, "output to not contain [[ or []" });
+        std.os.exit(1);
     }
 }
 
@@ -355,7 +422,7 @@ test "Log with Timestamp" {
     });
     defer file.close();
 
-    var logger = Logger.init(testing.allocator, file, LoggerOptions{
+    var logger = Logger.init(file, LogFormatPrefix, LoggerOptions{
         .color = false,
         .timestamp = true,
         .fileName = false,
@@ -386,7 +453,7 @@ test "Log with File Name and Line Number" {
     });
     defer file.close();
 
-    var logger = Logger.init(testing.allocator, file, LoggerOptions{
+    var logger = Logger.init(file, LogFormatPrefix, LoggerOptions{
         .color = false,
         .timestamp = false,
         .fileName = true,
@@ -415,7 +482,7 @@ test "Log with File Name and Line Number with Double Space" {
     });
     defer file.close();
 
-    var logger = Logger.init(testing.allocator, file, LoggerOptions{
+    var logger = Logger.init(file, LogFormatPrefix, LoggerOptions{
         .color = false,
         .timestamp = false,
         .fileName = true,
@@ -444,7 +511,7 @@ test "Log starts with reset" {
     });
     defer file.close();
 
-    var logger = Logger.init(testing.allocator, file, LoggerOptions{
+    var logger = Logger.init(file, LogFormatPrefix, LoggerOptions{
         .color = true,
         .timestamp = false,
         .fileName = false,
